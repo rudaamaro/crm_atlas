@@ -257,7 +257,6 @@ $representantesDisponiveis = $isAdmin
                     <option value="REPRESENTANTE" <?= $perfilAtual === 'REPRESENTANTE' ? 'selected' : '' ?>>Representante</option>
                     <option value="VENDEDOR" <?= $perfilAtual === 'VENDEDOR' ? 'selected' : '' ?>>Vendedor</option>
                     <option value="ADMIN" <?= $perfilAtual === 'ADMIN' ? 'selected' : '' ?>>Admin</option>
-                    <option value="ADMIN/REPRESENTANTE" <?= $perfilAtual === 'ADMIN/REPRESENTANTE' ? 'selected' : '' ?>>Admin + Representante</option>
                 </select>
             <?php else: ?>
                 <input type="hidden" name="role" value="VENDEDOR">
@@ -271,10 +270,7 @@ $representantesDisponiveis = $isAdmin
                 <select name="representante_id" id="representante_id" class="w-full rounded border border-slate-200 px-3 py-2 text-sm" <?= (old('role', $usuario['role'] ?? '') === 'VENDEDOR') ? '' : 'disabled' ?>>
                     <option value="">Selecione</option>
                     <?php foreach ($representantesDisponiveis as $rep): ?>
-
                         <option value="<?= $rep['id'] ?>" data-estado="<?= esc($rep['estado']) ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
-
-                        <option value="<?= $rep['id'] ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
 
                     <?php endforeach; ?>
                 </select>

@@ -7,6 +7,19 @@ $user = current_user();
 $isAdmin = is_admin($user);
 $isRep = is_representante($user);
 $isVendor = is_vendedor($user);
+$vendedoresDisponiveis = [];
+
+if ($isAdmin) {
+    $vendedoresDisponiveis = $pdo->query("SELECT id, name, representante_id FROM users WHERE active = 1 AND role LIKE '%VENDEDOR%' ORDER BY name")->fetchAll();
+} elseif ($isRep) {
+    $stmtVend = $pdo->prepare("SELECT id, name, representante_id FROM users WHERE active = 1 AND role LIKE '%VENDEDOR%' AND representante_id = :rep ORDER BY name");
+    $stmtVend->execute([':rep' => $user['id']]);
+    $vendedoresDisponiveis = $stmtVend->fetchAll();
+}
+
+$vendedorIdsPermitidos = array_map(static function ($vend) {
+    return (int)$vend['id'];
+}, $vendedoresDisponiveis);
 
 $statusLabels = [
     'ATIVO' => 'Ativo',
@@ -25,7 +38,7 @@ $statusOptions = [
 $filters = [
     'municipio_id' => isset($_GET['municipio_id']) && $_GET['municipio_id'] !== '' ? (int)$_GET['municipio_id'] : null,
     'representante_id' => $isAdmin && isset($_GET['representante_id']) && $_GET['representante_id'] !== '' ? (int)$_GET['representante_id'] : null,
-    'vendedor_id' => null,
+    'vendedor_id' => isset($_GET['vendedor_id']) && $_GET['vendedor_id'] !== '' ? (int)$_GET['vendedor_id'] : null,
     'situacao_atual' => trim($_GET['situacao_atual'] ?? ''),
     'status_proposta' => trim($_GET['status_proposta'] ?? ''),
     'data_inicio' => trim($_GET['data_inicio'] ?? ''),
@@ -41,6 +54,9 @@ if (!$isAdmin) {
         $filters['representante_id'] = null;
     } else {
         $filters['representante_id'] = (int)$user['id'];
+        if ($filters['vendedor_id'] && !in_array($filters['vendedor_id'], $vendedorIdsPermitidos, true)) {
+            $filters['vendedor_id'] = null;
+        }
     }
 }
 
@@ -98,84 +114,51 @@ unset($registro);
 
 $municipios = $pdo->query('SELECT id, nome FROM municipios ORDER BY nome')->fetchAll();
 $representantes = $isAdmin ? $pdo->query("SELECT id, name FROM users WHERE role LIKE '%REPRESENTANTE%' AND active = 1 ORDER BY name")->fetchAll() : [];
-if ($isAdmin) {
-    // Admin vê tudo
-    $distinctSituacoes = $pdo->query("
-        SELECT DISTINCT situacao_atual
-        FROM atendimentos
-        WHERE situacao_atual IS NOT NULL AND situacao_atual <> ''
-        ORDER BY situacao_atual
-    ")->fetchAll(PDO::FETCH_COLUMN);
-
-    $distinctStatus = $pdo->query("
-        SELECT DISTINCT status_proposta
-        FROM atendimentos
-        WHERE status_proposta IS NOT NULL AND status_proposta <> ''
-        ORDER BY status_proposta
-    ")->fetchAll(PDO::FETCH_COLUMN);
-} elseif ($isVendor) {
-    $vendId = (int)$user['id'];
-
-    $stmt = $pdo->prepare("
-        SELECT DISTINCT situacao_atual
-        FROM atendimentos
-        WHERE situacao_atual IS NOT NULL
-          AND situacao_atual <> ''
-          AND vendedor_id = :vendId
-        ORDER BY situacao_atual
-    ");
-    $stmt->execute(['vendId' => $vendId]);
-    $distinctSituacoes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $stmt = $pdo->prepare("
-        SELECT DISTINCT status_proposta
-        FROM atendimentos
-        WHERE status_proposta IS NOT NULL
-          AND status_proposta <> ''
-          AND vendedor_id = :vendId
-        ORDER BY status_proposta
-    ");
-    $stmt->execute(['vendId' => $vendId]);
-    $distinctStatus = $stmt->fetchAll(PDO::FETCH_COLUMN);
-} else {
-    // Representante vê apenas o que ele cadastrou
-    $repId = (int)$user['id'];
-
-    $stmt = $pdo->prepare("
-        SELECT DISTINCT situacao_atual
-        FROM atendimentos
-        WHERE situacao_atual IS NOT NULL
-          AND situacao_atual <> ''
-          AND representante_id = :repId
-        ORDER BY situacao_atual
-    ");
-    $stmt->execute(['repId' => $repId]);
-    $distinctSituacoes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $stmt = $pdo->prepare("
-        SELECT DISTINCT status_proposta
-        FROM atendimentos
-        WHERE status_proposta IS NOT NULL
-          AND status_proposta <> ''
-          AND representante_id = :repId
-        ORDER BY status_proposta
-    ");
-    $stmt->execute(['repId' => $repId]);
-    $distinctStatus = $stmt->fetchAll(PDO::FETCH_COLUMN);
+$distinctWhereBase = trim($whereSql);
+if ($distinctWhereBase === '') {
+    $distinctWhereBase = 'WHERE 1=1';
 }
 
+$situacaoSql = "
+    SELECT DISTINCT situacao_atual
+    FROM atendimentos a
+    {$distinctWhereBase}
+      AND situacao_atual IS NOT NULL
+      AND situacao_atual <> ''
+    ORDER BY situacao_atual
+";
+$statusSql = "
+    SELECT DISTINCT status_proposta
+    FROM atendimentos a
+    {$distinctWhereBase}
+      AND status_proposta IS NOT NULL
+      AND status_proposta <> ''
+    ORDER BY status_proposta
+";
 
-$summaryWhere = "status_geral <> 'ARQUIVADO'";
+$distinctSituacoesStmt = $pdo->prepare($situacaoSql);
+$distinctSituacoesStmt->execute($params);
+$distinctSituacoes = $distinctSituacoesStmt->fetchAll(PDO::FETCH_COLUMN);
+
+$distinctStatusStmt = $pdo->prepare($statusSql);
+$distinctStatusStmt->execute($params);
+$distinctStatus = $distinctStatusStmt->fetchAll(PDO::FETCH_COLUMN);
+
+
+$summaryWhereParts = ["status_geral <> 'ARQUIVADO'"];
 $summaryParams = [];
-if (!$isAdmin) {
-    if ($isVendor) {
-        $summaryWhere .= " AND vendedor_id = :vend_filter";
-        $summaryParams[':vend_filter'] = (int)$user['id'];
-    } else {
-        $summaryWhere .= " AND representante_id = :rep_filter";
-        $summaryParams[':rep_filter'] = (int)$user['id'];
-    }
+
+if (!empty($filters['representante_id'])) {
+    $summaryWhereParts[] = 'representante_id = :rep_filter';
+    $summaryParams[':rep_filter'] = (int)$filters['representante_id'];
 }
+
+if (!empty($filters['vendedor_id'])) {
+    $summaryWhereParts[] = 'vendedor_id = :vend_filter';
+    $summaryParams[':vend_filter'] = (int)$filters['vendedor_id'];
+}
+
+$summaryWhere = implode(' AND ', $summaryWhereParts);
 
 $dupStmt = $pdo->prepare("SELECT municipio_id FROM atendimentos WHERE $summaryWhere GROUP BY municipio_id HAVING COUNT(*) >= 2");
 $dupStmt->execute($summaryParams);
@@ -280,6 +263,19 @@ require __DIR__ . '/partials/header.php';
                     <option value="">Todos</option>
                     <?php foreach ($representantes as $rep): ?>
                         <option value="<?= $rep['id'] ?>" <?= $filters['representante_id'] === (int)$rep['id'] ? 'selected' : '' ?>><?= esc($rep['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        <?php endif; ?>
+        <?php if ($isAdmin || $isRep): ?>
+            <div>
+                <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="vendedor_id">Vendedor</label>
+                <select class="w-full rounded border border-slate-200 px-3 py-2 text-sm" name="vendedor_id" id="vendedor_id">
+                    <option value="">Todos</option>
+                    <?php foreach ($vendedoresDisponiveis as $vend): ?>
+                        <option value="<?= $vend['id'] ?>" <?= $filters['vendedor_id'] === (int)$vend['id'] ? 'selected' : '' ?>>
+                            <?= esc($vend['name']) ?>
+                        </option>
                     <?php endforeach; ?>
                 </select>
             </div>
