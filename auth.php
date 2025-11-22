@@ -13,7 +13,7 @@ function current_user(): ?array
         }
         try {
             $pdo = get_pdo();
-            $stmt = $pdo->prepare('SELECT id, name, email, role, active, last_login_at FROM users WHERE id = :id');
+            $stmt = $pdo->prepare('SELECT id, name, email, role, estado, cidade, representante_id, active, last_login_at FROM users WHERE id = :id');
             $stmt->execute([':id' => $_SESSION['user_id']]);
             $user = $stmt->fetch();
             if ($user && (int)$user['active'] === 1) {
@@ -99,6 +99,9 @@ function redirect_dashboard(array $user): void
 {
     if (is_admin($user)) {
         redirect('dashboard_admin.php');
+    }
+    if (is_vendedor($user)) {
+        redirect('dashboard_vendedor.php');
     }
     redirect('dashboard_rep.php');
 }

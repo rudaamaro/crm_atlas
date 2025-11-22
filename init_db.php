@@ -18,11 +18,27 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(120) NOT NULL,
     email VARCHAR(120) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    role ENUM('ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE') NOT NULL DEFAULT 'REPRESENTANTE',
+    role ENUM('ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR') NOT NULL DEFAULT 'REPRESENTANTE',
+    estado VARCHAR(10) NOT NULL DEFAULT '',
+    cidade VARCHAR(150) NULL,
+    representante_id INT NULL,
     active TINYINT(1) NOT NULL DEFAULT 1,
     last_login_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_users_representante FOREIGN KEY (representante_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+SQL);
+
+    // Ajustes incrementais para bases já existentes
+    ensure_user_columns($pdo);
+
+    $pdo->exec(<<<SQL
+CREATE TABLE IF NOT EXISTS user_estados (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    estado VARCHAR(10) NOT NULL,
+    CONSTRAINT fk_user_estados_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 SQL);
 
@@ -30,10 +46,15 @@ SQL);
 CREATE TABLE IF NOT EXISTS municipios (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(150) NOT NULL,
+    estado VARCHAR(10) NOT NULL DEFAULT '',
     codigo_ibge VARCHAR(20) NULL,
+    representante_id INT NULL,
+    vendedor_id INT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_nome (nome)
+    UNIQUE KEY unique_nome (nome),
+    CONSTRAINT fk_municipios_representante FOREIGN KEY (representante_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_municipios_vendedor FOREIGN KEY (vendedor_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 SQL);
 
@@ -85,6 +106,8 @@ SQL);
 
     ensure_status_column($pdo);
     ensure_external_rep_column($pdo);
+    ensure_user_columns($pdo);
+    ensure_municipio_columns($pdo);
 
     // <<< ALTERADO: só semeia admin se as constantes existirem e não estiverem vazias
     if (
@@ -120,6 +143,45 @@ function ensure_external_rep_column(PDO $pdo): void
     $isNullable = strtoupper((string)$stmt2->fetchColumn());
     if ($isNullable !== 'YES') {
         $pdo->exec("ALTER TABLE atendimentos MODIFY representante_id INT NULL");
+    }
+}
+
+function ensure_user_columns(PDO $pdo): void
+{
+    $columns = $pdo->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'")
+        ->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!in_array('estado', $columns, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN estado VARCHAR(10) NOT NULL DEFAULT '' AFTER role");
+    }
+    if (!in_array('cidade', $columns, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN cidade VARCHAR(150) NULL AFTER estado");
+    }
+    if (!in_array('representante_id', $columns, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN representante_id INT NULL AFTER cidade, ADD CONSTRAINT fk_users_representante FOREIGN KEY (representante_id) REFERENCES users(id) ON DELETE SET NULL");
+    }
+
+    // Ajusta o ENUM para incluir vendedor
+    $stmtRole = $pdo->query("SHOW COLUMNS FROM users LIKE 'role'");
+    $roleRow = $stmtRole->fetch();
+    if ($roleRow && isset($roleRow['Type']) && stripos($roleRow['Type'], 'VENDEDOR') === false) {
+        $pdo->exec("ALTER TABLE users MODIFY role ENUM('ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR') NOT NULL DEFAULT 'REPRESENTANTE'");
+    }
+}
+
+function ensure_municipio_columns(PDO $pdo): void
+{
+    $columns = $pdo->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'municipios'")
+        ->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!in_array('estado', $columns, true)) {
+        $pdo->exec("ALTER TABLE municipios ADD COLUMN estado VARCHAR(10) NOT NULL DEFAULT '' AFTER nome");
+    }
+    if (!in_array('representante_id', $columns, true)) {
+        $pdo->exec("ALTER TABLE municipios ADD COLUMN representante_id INT NULL AFTER codigo_ibge, ADD CONSTRAINT fk_municipios_representante FOREIGN KEY (representante_id) REFERENCES users(id) ON DELETE SET NULL");
+    }
+    if (!in_array('vendedor_id', $columns, true)) {
+        $pdo->exec("ALTER TABLE municipios ADD COLUMN vendedor_id INT NULL AFTER representante_id, ADD CONSTRAINT fk_municipios_vendedor FOREIGN KEY (vendedor_id) REFERENCES users(id) ON DELETE SET NULL");
     }
 }
 
