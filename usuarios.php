@@ -1,10 +1,34 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
 require_login();
-require_admin();
+
+$user = current_user();
+$isAdmin = is_admin($user);
+$isRep = is_representante($user);
+
+if (!$isAdmin && !$isRep) {
+    flash('auth', 'Acesso restrito.');
+    redirect_dashboard($user);
+}
 
 $pdo = get_pdo();
-$usuarios = $pdo->query('SELECT id, name, email, role, estado, cidade, active, last_login_at, created_at FROM users ORDER BY role DESC, name')->fetchAll();
+$usuarios = [];
+if ($isAdmin) {
+    $usuarios = $pdo->query('SELECT id, name, email, role, estado, cidade, representante_id, active, last_login_at, created_at FROM users ORDER BY role DESC, name')->fetchAll();
+} else {
+    $stmt = $pdo->prepare('SELECT id, name, email, role, estado, cidade, representante_id, active, last_login_at, created_at FROM users WHERE id = :id OR (representante_id = :id AND role = "VENDEDOR") ORDER BY role DESC, name');
+    $stmt->execute([':id' => $user['id']]);
+    $usuarios = $stmt->fetchAll();
+}
+
+$responsaveis = [];
+$responsavelIds = array_unique(array_filter(array_column($usuarios, 'representante_id')));
+if (!empty($responsavelIds)) {
+    $placeholders = implode(',', array_fill(0, count($responsavelIds), '?'));
+    $stmtResp = $pdo->prepare("SELECT id, name FROM users WHERE id IN ($placeholders)");
+    $stmtResp->execute($responsavelIds);
+    $responsaveis = $stmtResp->fetchAll(PDO::FETCH_KEY_PAIR);
+}
 
 $pageTitle = 'Usuarios';
 require __DIR__ . '/partials/header.php';
@@ -25,6 +49,7 @@ require __DIR__ . '/partials/header.php';
                     <th class="px-4 py-3">Nome</th>
                     <th class="px-4 py-3">Email</th>
                     <th class="px-4 py-3">Perfil</th>
+                    <th class="px-4 py-3">Responsavel</th>
                     <th class="px-4 py-3">Estado</th>
                     <th class="px-4 py-3">Ativo</th>
                     <th class="px-4 py-3">Ultimo login</th>
@@ -37,6 +62,13 @@ require __DIR__ . '/partials/header.php';
                         <td class="px-4 py-3 font-semibold text-slate-800"><?= esc($linha['name']) ?></td>
                         <td class="px-4 py-3 text-slate-600"><?= esc($linha['email']) ?></td>
                         <td class="px-4 py-3 text-slate-600"><?= esc($linha['role']) ?></td>
+                        <td class="px-4 py-3 text-slate-600">
+                            <?php if (!empty($linha['representante_id']) && isset($responsaveis[$linha['representante_id']])): ?>
+                                <?= esc($responsaveis[$linha['representante_id']]) ?>
+                            <?php else: ?>
+                                -
+                            <?php endif; ?>
+                        </td>
                         <td class="px-4 py-3 text-slate-600"><?= esc($linha['estado']) ?></td>
                         <td class="px-4 py-3 text-slate-600">
                             <?php if ((int)$linha['active'] === 1): ?>

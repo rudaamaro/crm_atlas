@@ -24,6 +24,8 @@ $user = current_user();
                     <a href="usuarios.php" class="hover:text-amber-300">Usuarios</a>
                     <a href="municipios.php" class="hover:text-amber-300">Municipios</a>
                     <a href="duplicidades.php" class="hover:text-amber-300">Duplicidades</a>
+                <?php elseif (is_representante($user)): ?>
+                    <a href="usuarios.php" class="hover:text-amber-300">Vendedores</a>
                 <?php endif; ?>
                 
                 <a href="logout.php" class="hover:text-amber-300">Sair</a>

@@ -5,6 +5,8 @@ require_login();
 $pdo = get_pdo();
 $user = current_user();
 $isAdmin = is_admin($user);
+$isRep = is_representante($user);
+$isVendor = is_vendedor($user);
 
 $statusOptions = [
     'ATIVO' => 'Ativo',
@@ -35,10 +37,17 @@ if (is_post()) {
         }
     }
 
+    $vendedorId = null;
+
     if ($isAdmin && $representanteTipo === 'externo') {
         $representanteId = null;
     } else {
-        $representanteId = $isAdmin ? (int)($_POST['representante_id'] ?? 0) : (int)$user['id'];
+        if ($isVendor) {
+            $representanteId = (int)($user['representante_id'] ?? 0);
+            $vendedorId = (int)$user['id'];
+        } else {
+            $representanteId = $isAdmin ? (int)($_POST['representante_id'] ?? 0) : (int)$user['id'];
+        }
     }
 
     if ($isAdmin) {
@@ -93,11 +102,19 @@ if (is_post()) {
         }
     }
 
+    if ($isVendor && $representanteId <= 0) {
+        $errors[] = 'Seu usuario precisa estar vinculado a um representante.';
+    }
+
     if ($isEdit) {
         $existing = find_atendimento($pdo, $id);
         if (!$existing) {
             $errors[] = 'Atendimento nao encontrado.';
-        } elseif (!$isAdmin && (int)$existing['representante_id'] !== (int)$user['id']) {
+        } elseif (
+            !$isAdmin
+            && !($isVendor && (int)$existing['vendedor_id'] === (int)$user['id'])
+            && !($isRep && (int)$existing['representante_id'] === (int)$user['id'])
+        ) {
             $errors[] = 'Voce nao tem permissao para editar este atendimento.';
         }
     }
@@ -114,6 +131,7 @@ if (is_post()) {
     }
 
     $representanteIdParam = ($representanteId !== null && (int)$representanteId > 0) ? (int)$representanteId : null;
+    $vendedorIdParam = ($vendedorId !== null && (int)$vendedorId > 0) ? (int)$vendedorId : null;
     $representanteNomeExternoParam = null;
     if ($isAdmin && $representanteTipo === 'externo' && $representanteNomeExterno !== '') {
         $nomeAdminParaRegistro = trim((string)($user['name'] ?? ''));
@@ -132,6 +150,7 @@ if (is_post()) {
     $baseParams = [
         ':municipio_id' => $municipioId,
         ':representante_id' => $representanteIdParam,
+        ':vendedor_id' => $vendedorIdParam,
         ':representante_nome_externo' => $representanteNomeExternoParam,
         ':periodo_relatorio' => nullable($formValues['periodo_relatorio']),
         ':secretaria_escola' => nullable($formValues['secretaria_escola']),
@@ -158,6 +177,7 @@ if (is_post()) {
 UPDATE atendimentos
 SET municipio_id = :municipio_id,
     representante_id = :representante_id,
+    vendedor_id = :vendedor_id,
     representante_nome_externo = :representante_nome_externo,
     periodo_relatorio = :periodo_relatorio,
     secretaria_escola = :secretaria_escola,
@@ -188,6 +208,7 @@ SQL;
 INSERT INTO atendimentos (
     municipio_id,
     representante_id,
+    vendedor_id,
     representante_nome_externo,
     periodo_relatorio,
     secretaria_escola,
@@ -210,6 +231,7 @@ INSERT INTO atendimentos (
 ) VALUES (
     :municipio_id,
     :representante_id,
+    :vendedor_id,
     :representante_nome_externo,
     :periodo_relatorio,
     :secretaria_escola,
@@ -249,7 +271,11 @@ if ($isEdit) {
         flash('error', 'Atendimento nao encontrado.');
         redirect('atendimentos.php');
     }
-    if (!$isAdmin && (int)$atendimento['representante_id'] !== (int)$user['id']) {
+    if (
+        !$isAdmin
+        && !($isVendor && (int)$atendimento['vendedor_id'] === (int)$user['id'])
+        && !($isRep && (int)$atendimento['representante_id'] === (int)$user['id'])
+    ) {
         flash('error', 'Voce nao tem permissao para visualizar este atendimento.');
         redirect('atendimentos.php');
     }

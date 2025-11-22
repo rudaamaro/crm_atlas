@@ -5,6 +5,8 @@ require_login();
 $pdo = get_pdo();
 $user = current_user();
 $isAdmin = is_admin($user);
+$isRep = is_representante($user);
+$isVendor = is_vendedor($user);
 
 $statusLabels = [
     'ATIVO' => 'Ativo',
@@ -23,6 +25,7 @@ $statusOptions = [
 $filters = [
     'municipio_id' => isset($_GET['municipio_id']) && $_GET['municipio_id'] !== '' ? (int)$_GET['municipio_id'] : null,
     'representante_id' => $isAdmin && isset($_GET['representante_id']) && $_GET['representante_id'] !== '' ? (int)$_GET['representante_id'] : null,
+    'vendedor_id' => null,
     'situacao_atual' => trim($_GET['situacao_atual'] ?? ''),
     'status_proposta' => trim($_GET['status_proposta'] ?? ''),
     'data_inicio' => trim($_GET['data_inicio'] ?? ''),
@@ -33,7 +36,12 @@ $filters = [
 ];
 
 if (!$isAdmin) {
-    $filters['representante_id'] = (int)$user['id'];
+    if ($isVendor) {
+        $filters['vendedor_id'] = (int)$user['id'];
+        $filters['representante_id'] = null;
+    } else {
+        $filters['representante_id'] = (int)$user['id'];
+    }
 }
 
 list($whereSql, $params) = build_where_clause($filters);
@@ -45,8 +53,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
 // Exportar PDF com os MESMOS filtros da tela
 if (isset($_GET['export']) && $_GET['export'] === 'pdf') {
-    // Gera o mesmo WHERE que já está em $whereSql/$params e passa para a rota dedicada
-    // Aqui eu redireciono para o endpoint limpo, que reconstrói o WHERE (admin + externos)
+    // Gera o mesmo WHERE que jÃ¡ estÃ¡ em $whereSql/$params e passa para a rota dedicada
+    // Aqui eu redireciono para o endpoint limpo, que reconstrÃ³i o WHERE (admin + externos)
     $qs = $_GET;
     // abre em nova guia/aba
     header('Location: export/pdf_atendimentos.php?' . http_build_query($qs));
@@ -58,17 +66,18 @@ $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = ITEMS_PER_PAGE;
 $offset = ($page - 1) * $perPage;
 
-$countSql = "SELECT COUNT(*) FROM atendimentos a INNER JOIN municipios m ON m.id = a.municipio_id LEFT JOIN users u ON u.id = a.representante_id {$whereSql}";
+$countSql = "SELECT COUNT(*) FROM atendimentos a INNER JOIN municipios m ON m.id = a.municipio_id LEFT JOIN users u ON u.id = a.representante_id LEFT JOIN users v ON v.id = a.vendedor_id {$whereSql}";
 $countStmt = $pdo->prepare($countSql);
 $countStmt->execute($params);
 $total = (int)$countStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($total / $perPage));
 
 $dataSql = <<<SQL
-SELECT a.*, m.nome AS municipio_nome, u.name AS representante_usuario_nome
+SELECT a.*, m.nome AS municipio_nome, u.name AS representante_usuario_nome, v.name AS vendedor_nome
 FROM atendimentos a
 INNER JOIN municipios m ON m.id = a.municipio_id
 LEFT JOIN users u ON u.id = a.representante_id
+LEFT JOIN users v ON v.id = a.vendedor_id
 {$whereSql}
 ORDER BY a.updated_at DESC
 LIMIT :limit OFFSET :offset
@@ -90,7 +99,7 @@ unset($registro);
 $municipios = $pdo->query('SELECT id, nome FROM municipios ORDER BY nome')->fetchAll();
 $representantes = $isAdmin ? $pdo->query("SELECT id, name FROM users WHERE role LIKE '%REPRESENTANTE%' AND active = 1 ORDER BY name")->fetchAll() : [];
 if ($isAdmin) {
-    // Admin v� tudo
+    // Admin vê tudo
     $distinctSituacoes = $pdo->query("
         SELECT DISTINCT situacao_atual
         FROM atendimentos
@@ -104,8 +113,32 @@ if ($isAdmin) {
         WHERE status_proposta IS NOT NULL AND status_proposta <> ''
         ORDER BY status_proposta
     ")->fetchAll(PDO::FETCH_COLUMN);
+} elseif ($isVendor) {
+    $vendId = (int)$user['id'];
+
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT situacao_atual
+        FROM atendimentos
+        WHERE situacao_atual IS NOT NULL
+          AND situacao_atual <> ''
+          AND vendedor_id = :vendId
+        ORDER BY situacao_atual
+    ");
+    $stmt->execute(['vendId' => $vendId]);
+    $distinctSituacoes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT status_proposta
+        FROM atendimentos
+        WHERE status_proposta IS NOT NULL
+          AND status_proposta <> ''
+          AND vendedor_id = :vendId
+        ORDER BY status_proposta
+    ");
+    $stmt->execute(['vendId' => $vendId]);
+    $distinctStatus = $stmt->fetchAll(PDO::FETCH_COLUMN);
 } else {
-    // Representante v� apenas o que ele cadastrou
+    // Representante vê apenas o que ele cadastrou
     $repId = (int)$user['id'];
 
     $stmt = $pdo->prepare("
@@ -135,8 +168,13 @@ if ($isAdmin) {
 $summaryWhere = "status_geral <> 'ARQUIVADO'";
 $summaryParams = [];
 if (!$isAdmin) {
-    $summaryWhere .= " AND representante_id = :rep_filter";
-    $summaryParams[':rep_filter'] = (int)$user['id'];
+    if ($isVendor) {
+        $summaryWhere .= " AND vendedor_id = :vend_filter";
+        $summaryParams[':vend_filter'] = (int)$user['id'];
+    } else {
+        $summaryWhere .= " AND representante_id = :rep_filter";
+        $summaryParams[':rep_filter'] = (int)$user['id'];
+    }
 }
 
 $dupStmt = $pdo->prepare("SELECT municipio_id FROM atendimentos WHERE $summaryWhere GROUP BY municipio_id HAVING COUNT(*) >= 2");
@@ -151,7 +189,7 @@ $municipiosDuplicados = count($duplicadosMunicipio);
 
 $resumoRepresentantes = [];
 
-/** LABEL visível entre os filtros e a tabela */
+/** LABEL visÃ­vel entre os filtros e a tabela */
 $filtroRepLabel = 'TODOS';
 if ($isAdmin) {
     if (!empty($filters['representante_id'])) {
@@ -300,12 +338,12 @@ require __DIR__ . '/partials/header.php';
             ?>
             <a href="<?= esc($pdfUrl) ?>" target="_blank"
                class="rounded border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-               title="Exportar PDF com os filtros aplicados">📄 Exportar PDF</a>
+               title="Exportar PDF com os filtros aplicados">ð Exportar PDF</a>
         </div>
 
     </form>
 
-            <!-- Linha com o nome do filtro selecionado (médio) -->
+            <!-- Linha com o nome do filtro selecionado (mÃ©dio) -->
     <div class="my-2 text-center text-base md:text-lg font-semibold uppercase tracking-wide text-slate-700">
          <?= esc($filtroRepLabel) ?> 
     </div>
@@ -317,6 +355,7 @@ require __DIR__ . '/partials/header.php';
                 <tr class="text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
                     <th class="px-4 py-3">Prefeitura</th>
                     <th class="px-4 py-3">Representante</th>
+                    <th class="px-4 py-3">Vendedor</th>
                     <th class="px-4 py-3">Situacao</th>
                     <th class="px-4 py-3">Status da proposta</th>
                     <th class="px-4 py-3">Status registro</th>
@@ -340,6 +379,9 @@ require __DIR__ . '/partials/header.php';
                             <?= esc($atendimento['representante_nome']) ?>
                         </td>
                         <td class="px-4 py-3 text-slate-600">
+                            <?= esc($atendimento['vendedor_nome'] ?? '--') ?>
+                        </td>
+                        <td class="px-4 py-3 text-slate-600">
                             <?= esc($atendimento['situacao_atual'] ?? '--') ?>
                         </td>
                         <td class="px-4 py-3 text-slate-600">
@@ -357,7 +399,7 @@ require __DIR__ . '/partials/header.php';
                         </td>
                         <td class="px-4 py-3 text-center">
                             <a href="atendimento_form.php?id=<?= $atendimento['id'] ?>" class="text-sm font-semibold text-slate-700 hover:text-slate-900">Editar</a>
-                            <?php if ($isAdmin || (int)$atendimento['representante_id'] === (int)$user['id']): ?>
+                            <?php if ($isAdmin || (int)$atendimento['representante_id'] === (int)$user['id'] || ($isVendor && (int)$atendimento['vendedor_id'] === (int)$user['id'])): ?>
                                 <span class="mx-1 text-slate-300">|</span>
                                 <a href="atendimento_delete.php?id=<?= $atendimento['id'] ?>" class="text-sm font-semibold text-rose-600 hover:text-rose-700" onclick="return confirm('Excluir atendimento? Esta acao nao pode ser desfeita.');">Excluir</a>
                             <?php endif; ?>
@@ -366,7 +408,7 @@ require __DIR__ . '/partials/header.php';
                 <?php endforeach; ?>
                 <?php if (empty($atendimentos)): ?>
                     <tr>
-                        <td colspan="8" class="px-4 py-8 text-center text-sm text-slate-500">Nenhum atendimento encontrado para os filtros informados.</td>
+                        <td colspan="9" class="px-4 py-8 text-center text-sm text-slate-500">Nenhum atendimento encontrado para os filtros informados.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -396,6 +438,11 @@ function build_where_clause(array $filters): array
     if ($filters['municipio_id']) {
         $where[] = 'a.municipio_id = :municipio_id';
         $params[':municipio_id'] = $filters['municipio_id'];
+    }
+
+    if (!empty($filters['vendedor_id'])) {
+        $where[] = 'a.vendedor_id = :vendedor_id';
+        $params[':vendedor_id'] = $filters['vendedor_id'];
     }
 
     // --- PATCH: representante interno + externos criados por ele (nome completo OU primeiro nome)

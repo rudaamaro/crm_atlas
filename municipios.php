@@ -1,15 +1,19 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
 require_login();
-require_admin();
 
 $pdo = get_pdo();
 
 // obtém dados do usuário logado
 $userId = (int)$_SESSION['user_id'];
-$stmtUser = $pdo->prepare('SELECT role, estado FROM users WHERE id = :id');
+$stmtUser = $pdo->prepare('SELECT id, role, estado FROM users WHERE id = :id');
 $stmtUser->execute([':id' => $userId]);
 $user = $stmtUser->fetch();
+
+if (!$user || is_vendedor($user)) {
+    flash('auth', 'Acesso restrito aos administradores ou representantes.');
+    redirect_dashboard($user ?? []);
+}
 
 // captura filtro manual (estado) da URL
 $filtroEstado = isset($_GET['estado']) && $_GET['estado'] !== '' ? trim($_GET['estado']) : null;
@@ -60,6 +64,10 @@ if (is_post()) {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'criar') {
+        if (!is_admin($user)) {
+            flash('auth', 'Apenas administradores podem criar municípios.');
+            redirect('municipios.php');
+        }
         $nome = trim($_POST['nome'] ?? '');
         $codigo_ibge = trim($_POST['codigo_ibge'] ?? '');
         $estadoMunicipio = trim($_POST['estado'] ?? $user['estado'] ?? '');
@@ -114,8 +122,10 @@ $sqlMunicipios = "
         m.id,
         m.nome,
         m.codigo_ibge,
-        m.created_at,
         m.estado,
+        m.representante_id,
+        m.vendedor_id,
+        m.created_at,
         COUNT(a.id) AS ativos,
         MIN(a.id) AS primeiro_atendimento_id
     FROM municipios m
@@ -142,7 +152,7 @@ if (!empty($where)) {
 }
 
 $sqlMunicipios .= "
-    GROUP BY m.id, m.nome, m.codigo_ibge, m.created_at, m.estado
+    GROUP BY m.id, m.nome, m.codigo_ibge, m.created_at, m.estado, m.representante_id, m.vendedor_id
 ";
 
 if ($filtroAtend === 'sem') {
@@ -156,6 +166,20 @@ $sqlMunicipios .= " ORDER BY m.estado, m.nome";
 $stmtMunicipios = $pdo->prepare($sqlMunicipios);
 $stmtMunicipios->execute($paramsMunicipios);
 $municipios = $stmtMunicipios->fetchAll();
+$responsaveisMunicipios = [];
+if (!empty($municipios)) {
+    $repIds = array_unique(array_filter(array_column($municipios, 'representante_id')));
+    $vendIds = array_unique(array_filter(array_column($municipios, 'vendedor_id')));
+    $allIds = array_unique(array_merge($repIds, $vendIds));
+    if (!empty($allIds)) {
+        $placeholders = implode(',', array_fill(0, count($allIds), '?'));
+        $stmtUsers = $pdo->prepare("SELECT id, name, role FROM users WHERE id IN ($placeholders)");
+        $stmtUsers->execute($allIds);
+        foreach ($stmtUsers->fetchAll() as $u) {
+            $responsaveisMunicipios[(int)$u['id']] = $u;
+        }
+    }
+}
 
 $totalMunicipios = count($municipios);
 $pageTitle = 'Municípios';
@@ -240,6 +264,8 @@ $listaEstados = $stmtEstados->fetchAll(PDO::FETCH_COLUMN);
                 <tr class="text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
                     <th class="px-4 py-3">Nome</th>
                     <th class="px-4 py-3">Estado</th>
+                    <th class="px-4 py-3">Representante</th>
+                    <th class="px-4 py-3">Vendedor</th>
                     <th class="px-4 py-3">Atendimentos ativos</th>
                     <th class="px-4 py-3">Código IBGE</th>
                     <th class="px-4 py-3">Cadastro</th>
@@ -252,6 +278,20 @@ $listaEstados = $stmtEstados->fetchAll(PDO::FETCH_COLUMN);
                             <span class="text-slate-400"><?= $i ?> - </span><?= esc($linha['nome']) ?>
                         </td>
                         <td class="px-4 py-3 text-slate-600"><?= esc($linha['estado'] ?? '') ?></td>
+                        <td class="px-4 py-3 text-slate-600">
+                            <?php if (!empty($linha['representante_id']) && isset($responsaveisMunicipios[(int)$linha['representante_id']])): ?>
+                                <?= esc($responsaveisMunicipios[(int)$linha['representante_id']]['name']) ?>
+                            <?php else: ?>
+                                -
+                            <?php endif; ?>
+                        </td>
+                        <td class="px-4 py-3 text-slate-600">
+                            <?php if (!empty($linha['vendedor_id']) && isset($responsaveisMunicipios[(int)$linha['vendedor_id']])): ?>
+                                <?= esc($responsaveisMunicipios[(int)$linha['vendedor_id']]['name']) ?>
+                            <?php else: ?>
+                                -
+                            <?php endif; ?>
+                        </td>
                         <td class="px-4 py-3 text-slate-600">
                             <div class="flex items-center gap-2">
                                 <span class="font-semibold text-slate-700"><?= (int)$linha['ativos'] ?></span>

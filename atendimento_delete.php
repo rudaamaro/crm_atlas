@@ -9,7 +9,7 @@ if ($id <= 0) {
 }
 
 $pdo = get_pdo();
-$stmt = $pdo->prepare('SELECT id, representante_id FROM atendimentos WHERE id = :id');
+$stmt = $pdo->prepare('SELECT id, representante_id, vendedor_id FROM atendimentos WHERE id = :id');
 $stmt->execute([':id' => $id]);
 $registro = $stmt->fetch();
 
@@ -21,7 +21,7 @@ if (!$registro) {
     redirect('atendimentos.php');
 }
 
-if (!$isAdmin && (int)$registro['representante_id'] !== (int)$user['id']) {
+if (!$isAdmin && (int)$registro['representante_id'] !== (int)$user['id'] && (int)$registro['vendedor_id'] !== (int)$user['id']) {
     flash('error', 'Voce nao tem permissao para excluir este atendimento.');
     redirect('atendimentos.php');
 }
