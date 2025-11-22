@@ -818,6 +818,7 @@ CREATE TABLE `atendimentos` (
   `id` int(11) NOT NULL,
   `municipio_id` int(11) NOT NULL,
   `representante_id` int(11) DEFAULT NULL,
+  `vendedor_id` int(11) DEFAULT NULL,
   `representante_nome_externo` varchar(150) DEFAULT NULL,
   `periodo_relatorio` varchar(100) DEFAULT NULL,
   `secretaria_escola` varchar(150) DEFAULT NULL,
@@ -950,6 +951,8 @@ CREATE TABLE `municipios` (
   `nome` varchar(150) NOT NULL,
   `codigo_ibge` varchar(20) DEFAULT NULL,
   `estado` varchar(2) DEFAULT NULL,
+  `representante_id` int(11) DEFAULT NULL,
+  `vendedor_id` int(11) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1115,10 +1118,11 @@ CREATE TABLE `users` (
   `name` varchar(120) NOT NULL,
   `email` varchar(120) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
-  `role` enum('ADMIN','REPRESENTANTE','VENDEDOR') NOT NULL DEFAULT 'VENDEDOR',
+  `role` enum('ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR') NOT NULL DEFAULT 'VENDEDOR',
   `created_by` int(11) DEFAULT NULL,
   `estado` varchar(50) NOT NULL,
   `cidade` varchar(100) DEFAULT NULL,
+  `representante_id` int(11) DEFAULT NULL,
   `active` tinyint(1) NOT NULL DEFAULT 1,
   `last_login_at` datetime DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
@@ -1179,6 +1183,7 @@ ALTER TABLE `atendimentos`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_atendimentos_municipio` (`municipio_id`),
   ADD KEY `idx_atendimentos_representante` (`representante_id`),
+  ADD KEY `idx_atendimentos_vendedor` (`vendedor_id`),
   ADD KEY `idx_atendimentos_data_contato` (`data_contato`);
 
 --
@@ -1193,14 +1198,17 @@ ALTER TABLE `estados_brasil`
 --
 ALTER TABLE `municipios`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `unique_nome` (`nome`);
+  ADD UNIQUE KEY `unique_nome` (`nome`),
+  ADD KEY `idx_municipios_representante` (`representante_id`),
+  ADD KEY `idx_municipios_vendedor` (`vendedor_id`);
 
 --
 -- Índices de tabela `users`
 --
 ALTER TABLE `users`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `email` (`email`);
+  ADD UNIQUE KEY `email` (`email`),
+  ADD KEY `idx_users_representante` (`representante_id`);
 
 --
 -- Índices de tabela `user_estados`
@@ -1264,7 +1272,21 @@ ALTER TABLE `activities`
 --
 ALTER TABLE `atendimentos`
   ADD CONSTRAINT `fk_atendimentos_municipio` FOREIGN KEY (`municipio_id`) REFERENCES `municipios` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `fk_atendimentos_representante` FOREIGN KEY (`representante_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+  ADD CONSTRAINT `fk_atendimentos_representante` FOREIGN KEY (`representante_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_atendimentos_vendedor` FOREIGN KEY (`vendedor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Restrições para tabelas `municipios`
+--
+ALTER TABLE `municipios`
+  ADD CONSTRAINT `fk_municipios_representante` FOREIGN KEY (`representante_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_municipios_vendedor` FOREIGN KEY (`vendedor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Restrições para tabelas `users`
+--
+ALTER TABLE `users`
+  ADD CONSTRAINT `fk_users_representante` FOREIGN KEY (`representante_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
