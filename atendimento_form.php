@@ -8,11 +8,57 @@ $isAdmin = is_admin($user);
 $isRep = is_representante($user);
 $isVendor = is_vendedor($user);
 
+$vendedoresDisponiveis = [];
+if ($isAdmin) {
+    $vendedoresDisponiveis = $pdo->query("SELECT id, name, representante_id, role FROM users WHERE active = 1 AND (role LIKE '%VENDEDOR%' OR role LIKE '%REPRESENTANTE%') ORDER BY name")->fetchAll();
+} elseif ($isRep) {
+    $stmtVend = $pdo->prepare("SELECT id, name, representante_id, role FROM users WHERE active = 1 AND ((role LIKE '%VENDEDOR%' AND representante_id = :rep) OR id = :rep) ORDER BY name");
+    $stmtVend->execute([':rep' => $user['id']]);
+    $vendedoresDisponiveis = $stmtVend->fetchAll();
+}
+$vendedoresIdsPermitidos = array_map(static function ($vend) {
+    return (int)$vend['id'];
+}, $vendedoresDisponiveis);
+
 $statusOptions = [
     'ATIVO' => 'Ativo',
     'CONCLUIDO' => 'Concluido',
     'ARQUIVADO' => 'Arquivado',
 ];
+
+function atualizar_municipio_responsaveis(PDO $pdo, int $municipioId, ?int $representanteId, ?int $vendedorId, int $responsavelPrincipal): void
+{
+    if ($representanteId === null && $vendedorId === null) {
+        return;
+    }
+
+    $stmt = $pdo->prepare('SELECT representante_id, vendedor_id FROM municipios WHERE id = :id');
+    $stmt->execute([':id' => $municipioId]);
+    $atual = $stmt->fetch();
+
+    if (!$atual) {
+        return;
+    }
+
+    $campos = [];
+    $params = [':id' => $municipioId];
+
+    if ($representanteId !== null && ($responsavelPrincipal === 1 || $atual['representante_id'] === null)) {
+        $campos[] = 'representante_id = :rep';
+        $params[':rep'] = $representanteId;
+    }
+
+    if ($vendedorId !== null && ($responsavelPrincipal === 1 || $atual['vendedor_id'] === null)) {
+        $campos[] = 'vendedor_id = :vend';
+        $params[':vend'] = $vendedorId;
+    }
+
+    if (!empty($campos)) {
+        $sql = 'UPDATE municipios SET ' . implode(', ', $campos) . ' WHERE id = :id';
+        $stmtUpdate = $pdo->prepare($sql);
+        $stmtUpdate->execute($params);
+    }
+}
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $isEdit = $id > 0;
@@ -47,6 +93,7 @@ if (is_post()) {
             $vendedorId = (int)$user['id'];
         } else {
             $representanteId = $isAdmin ? (int)($_POST['representante_id'] ?? 0) : (int)$user['id'];
+            $vendedorId = isset($_POST['vendedor_id']) && $_POST['vendedor_id'] !== '' ? (int)$_POST['vendedor_id'] : null;
         }
     }
 
@@ -100,6 +147,14 @@ if (is_post()) {
         if ($representanteId <= 0) {
             $errors[] = 'Selecione um representante valido.';
         }
+    }
+
+    if (!$isAdmin && !$isRep && !$isVendor) {
+        $errors[] = 'Perfil sem permissao para criar atendimento.';
+    }
+
+    if ($vendedorId !== null && !in_array((int)$vendedorId, $vendedoresIdsPermitidos, true) && !$isVendor) {
+        $errors[] = 'Selecione um vendedor valido.';
     }
 
     if ($isVendor && $representanteId <= 0) {
@@ -201,6 +256,7 @@ WHERE id = :id
 SQL;
         $stmt = $pdo->prepare($sql);
         $stmt->execute(array_merge($baseParams, [':id' => $id]));
+        atualizar_municipio_responsaveis($pdo, $municipioId, $representanteIdParam, $vendedorIdParam, (int)$formValues['responsavel_principal']);
         log_activity((int)$user['id'], 'atendimento_update', 'Atualizou atendimento #' . $id);
         flash('status', 'Atendimento atualizado com sucesso.');
     } else {
@@ -256,6 +312,7 @@ SQL;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($baseParams);
         $novoId = (int)$pdo->lastInsertId();
+        atualizar_municipio_responsaveis($pdo, $municipioId, $representanteIdParam, $vendedorIdParam, (int)$formValues['responsavel_principal']);
         log_activity((int)$user['id'], 'atendimento_create', 'Criou atendimento #' . $novoId);
         flash('status', 'Atendimento criado com sucesso.');
     }
@@ -392,8 +449,43 @@ require __DIR__ . '/partials/header.php';
                 <div>
                     <label class="mb-1 block text-xs font-semibold uppercase text-slate-500">Representante *</label>
                     <input type="text" value="<?= esc($user['name'] ?? $user['email']) ?>" disabled class="w-full rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
+                    <input type="hidden" name="representante_id" value="<?= (int)$user['id'] ?>">
                 </div>
             <?php endif; ?>
+            <div>
+                <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="vendedor_id">Vendedor</label>
+                <?php $vendedorSelecionado = old('vendedor_id', $atendimento['vendedor_id'] ?? ($isVendor ? $user['id'] : '')); ?>
+                <?php if ($isVendor): ?>
+                    <input type="hidden" name="vendedor_id" value="<?= (int)$user['id'] ?>">
+                    <input type="text" value="<?= esc($user['name'] ?? $user['email']) ?>" disabled class="w-full rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
+                <?php elseif ($isAdmin || $isRep): ?>
+                    <select name="vendedor_id" id="vendedor_id" class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
+                        <option value="">Selecione</option>
+                        <?php
+                        $renderizados = [];
+                        foreach ($vendedoresDisponiveis as $vend):
+                            $vendId = (int)$vend['id'];
+                            if (in_array($vendId, $renderizados, true)) {
+                                continue;
+                            }
+                            $renderizados[] = $vendId;
+                            $repIdOpt = $vend['representante_id'] ?? null;
+                            if ($repIdOpt === null && strpos((string)$vend['role'], 'REPRESENTANTE') !== false) {
+                                $repIdOpt = $vendId;
+                            }
+                            ?>
+                            <option value="<?= $vendId ?>" data-representante="<?= $repIdOpt ?>" <?= (string)$vendedorSelecionado === (string)$vendId ? 'selected' : '' ?>><?= esc($vend['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php else: ?>
+                    <input type="text" value="<?= esc($user['name'] ?? $user['email']) ?>" disabled class="w-full rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
+                <?php endif; ?>
+                <?php if ($isRep): ?>
+                    <p class="mt-1 text-xs text-slate-500">Inclui voce e vendedores vinculados.</p>
+                <?php elseif ($isAdmin): ?>
+                    <p class="mt-1 text-xs text-slate-500">Filtre os vendedores conforme o representante selecionado.</p>
+                <?php endif; ?>
+            </div>
         </div>
 
         <div class="grid gap-4 md:grid-cols-2">
@@ -528,6 +620,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var externoWrapper = document.querySelector('[data-representante-externo]');
     var selectInterno = document.getElementById('representante_id');
     var externoInput = document.getElementById('representante_externo');
+    var vendedorSelect = document.getElementById('vendedor_id');
 
     function toggleCampos() {
         var selecionado = document.querySelector('input[name="representante_tipo"]:checked');
@@ -563,13 +656,42 @@ document.addEventListener('DOMContentLoaded', function () {
                 externoInput.removeAttribute('required');
             }
         }
+        filtrarVendedoresPorRepresentante();
+    }
+
+    function filtrarVendedoresPorRepresentante() {
+        if (!vendedorSelect) {
+            return;
+        }
+        var repSelect = document.getElementById('representante_id');
+        var repSelecionado = repSelect ? repSelect.value : '';
+
+        Array.prototype.forEach.call(vendedorSelect.options, function (opt) {
+            if (!opt.dataset.representante || opt.value === '') {
+                opt.hidden = false;
+                return;
+            }
+            var repAlvo = opt.dataset.representante;
+            var mostrar = repSelecionado === '' || repAlvo === repSelecionado;
+            opt.hidden = !mostrar;
+        });
+
+        if (vendedorSelect.selectedOptions.length && vendedorSelect.selectedOptions[0].hidden) {
+            vendedorSelect.value = '';
+        }
     }
 
     radios.forEach(function (radio) {
         radio.addEventListener('change', toggleCampos);
     });
 
+    var repSelect = document.getElementById('representante_id');
+    if (repSelect) {
+        repSelect.addEventListener('change', filtrarVendedoresPorRepresentante);
+    }
+
     toggleCampos();
+    filtrarVendedoresPorRepresentante();
 });
 </script>
 <?php endif; ?>
