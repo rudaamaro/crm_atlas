@@ -124,11 +124,15 @@ $sqlMunicipios = "
         m.codigo_ibge,
         m.estado,
         m.representante_id,
+        rep.name AS representante_nome,
         m.vendedor_id,
+        vend.name AS vendedor_nome,
         m.created_at,
         COUNT(a.id) AS ativos,
         MIN(a.id) AS primeiro_atendimento_id
     FROM municipios m
+    LEFT JOIN users rep ON rep.id = m.representante_id
+    LEFT JOIN users vend ON vend.id = m.vendedor_id
     LEFT JOIN atendimentos a
         ON a.municipio_id = m.id
        AND a.status_geral <> 'ARQUIVADO'
@@ -152,7 +156,7 @@ if (!empty($where)) {
 }
 
 $sqlMunicipios .= "
-    GROUP BY m.id, m.nome, m.codigo_ibge, m.created_at, m.estado, m.representante_id, m.vendedor_id
+    GROUP BY m.id, m.nome, m.codigo_ibge, m.created_at, m.estado, m.representante_id, rep.name, m.vendedor_id, vend.name
 ";
 
 if ($filtroAtend === 'sem') {
@@ -166,20 +170,6 @@ $sqlMunicipios .= " ORDER BY m.estado, m.nome";
 $stmtMunicipios = $pdo->prepare($sqlMunicipios);
 $stmtMunicipios->execute($paramsMunicipios);
 $municipios = $stmtMunicipios->fetchAll();
-$responsaveisMunicipios = [];
-if (!empty($municipios)) {
-    $repIds = array_unique(array_filter(array_column($municipios, 'representante_id')));
-    $vendIds = array_unique(array_filter(array_column($municipios, 'vendedor_id')));
-    $allIds = array_unique(array_merge($repIds, $vendIds));
-    if (!empty($allIds)) {
-        $placeholders = implode(',', array_fill(0, count($allIds), '?'));
-        $stmtUsers = $pdo->prepare("SELECT id, name, role FROM users WHERE id IN ($placeholders)");
-        $stmtUsers->execute($allIds);
-        foreach ($stmtUsers->fetchAll() as $u) {
-            $responsaveisMunicipios[(int)$u['id']] = $u;
-        }
-    }
-}
 
 $totalMunicipios = count($municipios);
 $pageTitle = 'Municípios';
@@ -279,18 +269,10 @@ $listaEstados = $stmtEstados->fetchAll(PDO::FETCH_COLUMN);
                         </td>
                         <td class="px-4 py-3 text-slate-600"><?= esc($linha['estado'] ?? '') ?></td>
                         <td class="px-4 py-3 text-slate-600">
-                            <?php if (!empty($linha['representante_id']) && isset($responsaveisMunicipios[(int)$linha['representante_id']])): ?>
-                                <?= esc($responsaveisMunicipios[(int)$linha['representante_id']]['name']) ?>
-                            <?php else: ?>
-                                -
-                            <?php endif; ?>
+                            <?= $linha['representante_nome'] ? esc($linha['representante_nome']) : '-' ?>
                         </td>
                         <td class="px-4 py-3 text-slate-600">
-                            <?php if (!empty($linha['vendedor_id']) && isset($responsaveisMunicipios[(int)$linha['vendedor_id']])): ?>
-                                <?= esc($responsaveisMunicipios[(int)$linha['vendedor_id']]['name']) ?>
-                            <?php else: ?>
-                                -
-                            <?php endif; ?>
+                            <?= $linha['vendedor_nome'] ? esc($linha['vendedor_nome']) : '-' ?>
                         </td>
                         <td class="px-4 py-3 text-slate-600">
                             <div class="flex items-center gap-2">
