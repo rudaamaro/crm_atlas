@@ -5,6 +5,7 @@ require_login();
 $currentUser = current_user();
 $isAdmin = is_admin($currentUser);
 $isRep = is_representante($currentUser);
+$isVendor = is_vendedor($currentUser);
 
 if (!$isAdmin && !$isRep) {
     flash('auth', 'Acesso restrito a administradores ou representantes.');
@@ -43,6 +44,31 @@ if (is_post()) {
         if ($email === '') $erros[] = 'Informe o email.';
         elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $erros[] = 'Email invalido.';
         if (!in_array($role, ['ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR'], true)) $erros[] = 'Perfil invalido.';
+
+        if ($isRep) {
+            // Representante só cria/edita vendedores vinculados a si
+            $role = 'VENDEDOR';
+            $responsavelId = (int)$currentUser['id'];
+            $estado = $currentUser['estado'];
+        }
+
+        if ($role === 'VENDEDOR' && $isAdmin) {
+            if (!$responsavelId) {
+                $erros[] = 'Selecione o representante responsável.';
+            } else {
+                $stmtRep = $pdo->prepare("SELECT id, estado FROM users WHERE id = :id AND role LIKE '%REPRESENTANTE%'");
+                $stmtRep->execute([':id' => $responsavelId]);
+                $responsavel = $stmtRep->fetch();
+                if ($responsavel) {
+                    $estado = (string)$responsavel['estado'];
+                    $responsavelId = (int)$responsavel['id'];
+                } else {
+                    $erros[] = 'Representante responsável inválido.';
+                }
+            }
+        }
+
+
         if ($estado === '') $erros[] = 'Informe o estado.';
 
         if ($isRep) {
@@ -245,7 +271,11 @@ $representantesDisponiveis = $isAdmin
                 <select name="representante_id" id="representante_id" class="w-full rounded border border-slate-200 px-3 py-2 text-sm" <?= (old('role', $usuario['role'] ?? '') === 'VENDEDOR') ? '' : 'disabled' ?>>
                     <option value="">Selecione</option>
                     <?php foreach ($representantesDisponiveis as $rep): ?>
+
+                        <option value="<?= $rep['id'] ?>" data-estado="<?= esc($rep['estado']) ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
+
                         <option value="<?= $rep['id'] ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
+
                     <?php endforeach; ?>
                 </select>
                 <p class="mt-1 text-xs text-slate-500">Obrigatório para vendedores.</p>
@@ -268,6 +298,10 @@ $representantesDisponiveis = $isAdmin
                         <option value="<?= $uf ?>" <?= $estadoAtual === $uf ? 'selected' : '' ?>><?= $uf ?></option>
                     <?php endforeach; ?>
                 </select>
+
+                <p id="estado_hint" class="mt-1 text-xs text-slate-500 hidden">Estado herdado do representante responsável.</p>
+
+
             <?php endif; ?>
         </div>
 
@@ -336,4 +370,51 @@ $representantesDisponiveis = $isAdmin
 </div>
 <?php
 clear_old();
+if ($isAdmin): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var roleSelect = document.getElementById('role');
+    var repSelect = document.getElementById('representante_id');
+    var estadoSelect = document.getElementById('estado');
+    var estadoHint = document.getElementById('estado_hint');
+
+    function estadoDoRepresentante() {
+        if (!repSelect || repSelect.selectedIndex < 0) {
+            return '';
+        }
+        var opt = repSelect.options[repSelect.selectedIndex];
+        return opt ? (opt.getAttribute('data-estado') || '') : '';
+    }
+
+    function travarEstadoSeVendedor() {
+        if (!estadoSelect) return;
+        var isVendedor = roleSelect && roleSelect.value === 'VENDEDOR';
+        var estadoRep = estadoDoRepresentante();
+
+        if (isVendedor) {
+            if (estadoRep !== '') {
+                estadoSelect.value = estadoRep;
+            }
+            estadoSelect.classList.add('bg-slate-50', 'text-slate-600', 'pointer-events-none');
+            estadoSelect.setAttribute('tabindex', '-1');
+            if (estadoHint) estadoHint.classList.remove('hidden');
+        } else {
+            estadoSelect.classList.remove('bg-slate-50', 'text-slate-600', 'pointer-events-none');
+            estadoSelect.removeAttribute('tabindex');
+            if (estadoHint) estadoHint.classList.add('hidden');
+        }
+    }
+
+    if (roleSelect) {
+        roleSelect.addEventListener('change', travarEstadoSeVendedor);
+    }
+    if (repSelect) {
+        repSelect.addEventListener('change', travarEstadoSeVendedor);
+    }
+
+    travarEstadoSeVendedor();
+});
+</script>
+<?php
+endif;
 require __DIR__ . '/partials/footer.php';

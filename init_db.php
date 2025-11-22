@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS atendimentos (
     id INT AUTO_INCREMENT PRIMARY KEY,
     municipio_id INT NOT NULL,
     representante_id INT NULL,
+    vendedor_id INT NULL,
     representante_nome_externo VARCHAR(150) NULL,
     periodo_relatorio VARCHAR(100) NULL,
     secretaria_escola VARCHAR(150) NULL,
@@ -86,8 +87,10 @@ CREATE TABLE IF NOT EXISTS atendimentos (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_atendimentos_municipio FOREIGN KEY (municipio_id) REFERENCES municipios(id) ON DELETE CASCADE,
     CONSTRAINT fk_atendimentos_representante FOREIGN KEY (representante_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_atendimentos_vendedor FOREIGN KEY (vendedor_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_atendimentos_municipio (municipio_id),
     INDEX idx_atendimentos_representante (representante_id),
+    INDEX idx_atendimentos_vendedor (vendedor_id),
     INDEX idx_atendimentos_data_contato (data_contato)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 SQL);
@@ -106,6 +109,7 @@ SQL);
 
     ensure_status_column($pdo);
     ensure_external_rep_column($pdo);
+    ensure_atendimento_columns($pdo);
     ensure_user_columns($pdo);
     ensure_municipio_columns($pdo);
 
@@ -145,6 +149,19 @@ function ensure_external_rep_column(PDO $pdo): void
         $pdo->exec("ALTER TABLE atendimentos MODIFY representante_id INT NULL");
     }
 }
+
+
+function ensure_atendimento_columns(PDO $pdo): void
+{
+    $columns = $pdo->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'atendimentos'")
+        ->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!in_array('vendedor_id', $columns, true)) {
+        $pdo->exec("ALTER TABLE atendimentos ADD COLUMN vendedor_id INT NULL AFTER representante_id, ADD CONSTRAINT fk_atendimentos_vendedor FOREIGN KEY (vendedor_id) REFERENCES users(id) ON DELETE SET NULL");
+        $pdo->exec("CREATE INDEX idx_atendimentos_vendedor ON atendimentos (vendedor_id)");
+    }
+}
+
 
 function ensure_user_columns(PDO $pdo): void
 {
