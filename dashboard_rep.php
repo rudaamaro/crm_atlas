@@ -10,7 +10,15 @@ $pdo = get_pdo();
 $userId = (int)$user['id'];
 
 // Vendedores do representante (ativos)
-$stmtVend = $pdo->prepare("SELECT id, name FROM users WHERE representante_id = :rep AND role LIKE '%VENDEDOR%' AND active = 1 ORDER BY name");
+$sqlVend = <<<SQL
+SELECT id, name
+FROM users
+WHERE representante_id = :rep
+  AND role LIKE '%VENDEDOR%'
+  AND active = 1
+ORDER BY name
+SQL;
+$stmtVend = $pdo->prepare($sqlVend);
 $stmtVend->execute([':rep' => $userId]);
 $vendedores = $stmtVend->fetchAll();
 

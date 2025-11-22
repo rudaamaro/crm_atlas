@@ -10,9 +10,22 @@ $isVendor = is_vendedor($user);
 
 $vendedoresDisponiveis = [];
 if ($isAdmin) {
-    $vendedoresDisponiveis = $pdo->query("SELECT id, name, representante_id, role FROM users WHERE active = 1 AND (role LIKE '%VENDEDOR%' OR role LIKE '%REPRESENTANTE%') ORDER BY name")->fetchAll();
+    $sqlVendAdmin = <<<SQL
+SELECT id, name, representante_id, role
+FROM users
+WHERE active = 1 AND (role LIKE '%VENDEDOR%' OR role LIKE '%REPRESENTANTE%')
+ORDER BY name
+SQL;
+    $vendedoresDisponiveis = $pdo->query($sqlVendAdmin)->fetchAll();
 } elseif ($isRep) {
-    $stmtVend = $pdo->prepare("SELECT id, name, representante_id, role FROM users WHERE active = 1 AND ((role LIKE '%VENDEDOR%' AND representante_id = :rep) OR id = :rep) ORDER BY name");
+    $sqlVendRep = <<<SQL
+SELECT id, name, representante_id, role
+FROM users
+WHERE active = 1
+  AND ((role LIKE '%VENDEDOR%' AND representante_id = :rep) OR id = :rep)
+ORDER BY name
+SQL;
+    $stmtVend = $pdo->prepare($sqlVendRep);
     $stmtVend->execute([':rep' => $user['id']]);
     $vendedoresDisponiveis = $stmtVend->fetchAll();
 }
