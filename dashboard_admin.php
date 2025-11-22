@@ -19,7 +19,11 @@ $repSelecionado = isset($_GET['representante_id']) ? (int)$_GET['representante_i
 $wherePartes = ["status_geral <> 'ARQUIVADO'"];
 $params = [];
 if ($repSelecionado > 0) {
-    $wherePartes[] = 'representante_id = :rep';
+    // inclui atendimentos do representante e dos vendedores vinculados a ele
+    $wherePartes[] = '(
+        representante_id = :rep
+        OR vendedor_id IN (SELECT id FROM users WHERE representante_id = :rep)
+    )';
     $params[':rep'] = $repSelecionado;
 }
 $whereSQL = implode(' AND ', $wherePartes);
@@ -75,7 +79,11 @@ SELECT COUNT(*) FROM (
     INNER JOIN atendimentos outros
         ON outros.municipio_id = a.municipio_id
        AND outros.status_geral <> 'ARQUIVADO'
-    WHERE a.status_geral <> 'ARQUIVADO' AND a.representante_id = :rep_dup
+    WHERE a.status_geral <> 'ARQUIVADO'
+      AND (
+          a.representante_id = :rep_dup
+          OR a.vendedor_id IN (SELECT id FROM users WHERE representante_id = :rep_dup)
+      )
     GROUP BY a.municipio_id
     HAVING COUNT(DISTINCT outros.representante_id) >= 2
 ) dup
@@ -104,8 +112,14 @@ $repWhereA2 = null;
 $paramsResumo = [];
 
 if ($repSelecionado > 0) {
-    $repWhereA1 = 'a.representante_id = :rep_r1';
-    $repWhereA2 = 'a.representante_id = :rep_r2';
+    $repWhereA1 = '(
+        a.representante_id = :rep_r1
+        OR a.vendedor_id IN (SELECT id FROM users WHERE representante_id = :rep_r1)
+    )';
+    $repWhereA2 = '(
+        a.representante_id = :rep_r2
+        OR a.vendedor_id IN (SELECT id FROM users WHERE representante_id = :rep_r2)
+    )';
     $paramsResumo[':rep_r1'] = $repSelecionado;
     $paramsResumo[':rep_r2'] = $repSelecionado;
 }
