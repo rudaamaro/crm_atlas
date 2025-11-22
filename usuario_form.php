@@ -1,7 +1,15 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
 require_login();
-require_admin();
+
+$currentUser = current_user();
+$isAdmin = is_admin($currentUser);
+$isRep = is_representante($currentUser);
+
+if (!$isAdmin && !$isRep) {
+    flash('auth', 'Acesso restrito a administradores ou representantes.');
+    redirect_dashboard($currentUser);
+}
 
 $pdo = get_pdo();
 
@@ -15,9 +23,10 @@ if (is_post()) {
 
         $nome   = trim($_POST['name'] ?? '');
         $email  = trim($_POST['email'] ?? '');
-        $role   = $_POST['role'] ?? 'REPRESENTANTE';
+        $role   = $_POST['role'] ?? ($isAdmin ? 'REPRESENTANTE' : 'VENDEDOR');
         $estado = trim($_POST['estado'] ?? '');
         $cidade = trim($_POST['cidade'] ?? '');
+        $responsavelId = isset($_POST['representante_id']) ? (int)$_POST['representante_id'] : null;
         $senha  = $_POST['password'] ?? '';
         $senhaConfirmacao = $_POST['password_confirmation'] ?? '';
 
@@ -33,8 +42,19 @@ if (is_post()) {
         if ($nome === '')  $erros[] = 'Informe o nome.';
         if ($email === '') $erros[] = 'Informe o email.';
         elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $erros[] = 'Email invalido.';
-        if (!in_array($role, ['ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE'], true)) $erros[] = 'Perfil invalido.';
+        if (!in_array($role, ['ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR'], true)) $erros[] = 'Perfil invalido.';
         if ($estado === '') $erros[] = 'Informe o estado.';
+
+        if ($isRep) {
+            // Representante só cria/edita vendedores vinculados a si
+            $role = 'VENDEDOR';
+            $responsavelId = (int)$currentUser['id'];
+            $estado = $currentUser['estado'];
+        }
+
+        if ($role === 'VENDEDOR' && !$responsavelId && $isAdmin) {
+            $erros[] = 'Selecione o representante responsável.';
+        }
 
         if ($isEdit) {
             if ($senha !== '' && strlen($senha) < 6) $erros[] = 'A senha deve ter pelo menos 6 caracteres.';
@@ -73,11 +93,12 @@ if (is_post()) {
                 ':role'   => $role,
                 ':estado' => $estado,
                 ':cidade' => $cidade,
+                ':representante_id' => $responsavelId,
                 ':id'     => $id,
             ];
 
             $sql = 'UPDATE users
-                    SET name = :name, email = :email, role = :role, estado = :estado, cidade = :cidade';
+                    SET name = :name, email = :email, role = :role, estado = :estado, cidade = :cidade, representante_id = :representante_id';
 
             if ($senha !== '') {
                 $sql .= ', password_hash = :password_hash';
@@ -103,14 +124,15 @@ if (is_post()) {
         } else {
             // cria usuário
             $pdo->prepare('
-                INSERT INTO users (name, email, role, estado, cidade, password_hash, active)
-                VALUES (:name, :email, :role, :estado, :cidade, :password_hash, 1)
+                INSERT INTO users (name, email, role, estado, cidade, representante_id, password_hash, active)
+                VALUES (:name, :email, :role, :estado, :cidade, :representante_id, :password_hash, 1)
             ')->execute([
                 ':name'          => $nome,
                 ':email'         => $email,
                 ':role'          => $role,
                 ':estado'        => $estado,
                 ':cidade'        => $cidade,
+                ':representante_id' => $responsavelId,
                 ':password_hash' => password_hash($senha, PASSWORD_DEFAULT),
             ]);
 
@@ -144,13 +166,20 @@ if (is_post()) {
 $usuario = null;
 $estadosExtras = [];
 if ($isEdit) {
-    $stmt = $pdo->prepare('SELECT id, name, email, role, estado, cidade FROM users WHERE id = :id');
+    $stmt = $pdo->prepare('SELECT id, name, email, role, estado, cidade, representante_id FROM users WHERE id = :id');
     $stmt->execute([':id' => $id]);
     $usuario = $stmt->fetch();
 
     if (!$usuario) {
         flash('error', 'Usuario nao encontrado.');
         redirect('usuarios.php');
+    }
+
+    if (!$isAdmin) {
+        if ($usuario['role'] !== 'VENDEDOR' || (int)$usuario['representante_id'] !== (int)$currentUser['id']) {
+            flash('auth', 'Você só pode editar vendedores vinculados a você.');
+            redirect('usuarios.php');
+        }
     }
 
     // estados adicionais do usuário
@@ -164,8 +193,12 @@ require __DIR__ . '/partials/header.php';
 
 // Lista de UFs (use input text se preferir; aqui deixo como <select>)
 $todosEstados = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
-$estadoAtual  = esc(old('estado', $usuario['estado'] ?? ''));
+$estadoAtual  = esc(old('estado', $usuario['estado'] ?? ($isRep ? $currentUser['estado'] : '')));
 $cidadeAtual  = esc(old('cidade', $usuario['cidade'] ?? ''));
+$responsavelAtual = (int)old('representante_id', $usuario['representante_id'] ?? ($isRep ? $currentUser['id'] : 0));
+$representantesDisponiveis = $isAdmin
+    ? $pdo->query("SELECT id, name, estado FROM users WHERE role LIKE '%REPRESENTANTE%' AND active = 1 ORDER BY name")->fetchAll()
+    : [];
 ?>
 <div class="max-w-xl">
     <div class="mb-6 flex items-center justify-between">
@@ -192,23 +225,50 @@ $cidadeAtual  = esc(old('cidade', $usuario['cidade'] ?? ''));
 
         <div>
             <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="role">Perfil</label>
-            <select name="role" id="role" class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
-                <?php $perfilAtual = old('role', $usuario['role'] ?? 'REPRESENTANTE'); ?>
-                <option value="REPRESENTANTE" <?= $perfilAtual === 'REPRESENTANTE' ? 'selected' : '' ?>>Representante</option>
-                <option value="ADMIN" <?= $perfilAtual === 'ADMIN' ? 'selected' : '' ?>>Admin</option>
-                <option value="ADMIN/REPRESENTANTE" <?= $perfilAtual === 'ADMIN/REPRESENTANTE' ? 'selected' : '' ?>>Admin + Representante</option>
-            </select>
+            <?php if ($isAdmin): ?>
+                <select name="role" id="role" class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
+                    <?php $perfilAtual = old('role', $usuario['role'] ?? 'REPRESENTANTE'); ?>
+                    <option value="REPRESENTANTE" <?= $perfilAtual === 'REPRESENTANTE' ? 'selected' : '' ?>>Representante</option>
+                    <option value="VENDEDOR" <?= $perfilAtual === 'VENDEDOR' ? 'selected' : '' ?>>Vendedor</option>
+                    <option value="ADMIN" <?= $perfilAtual === 'ADMIN' ? 'selected' : '' ?>>Admin</option>
+                    <option value="ADMIN/REPRESENTANTE" <?= $perfilAtual === 'ADMIN/REPRESENTANTE' ? 'selected' : '' ?>>Admin + Representante</option>
+                </select>
+            <?php else: ?>
+                <input type="hidden" name="role" value="VENDEDOR">
+                <div class="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">Vendedor</div>
+            <?php endif; ?>
+        </div>
+
+        <div>
+            <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="representante_id">Representante responsável</label>
+            <?php if ($isAdmin): ?>
+                <select name="representante_id" id="representante_id" class="w-full rounded border border-slate-200 px-3 py-2 text-sm" <?= (old('role', $usuario['role'] ?? '') === 'VENDEDOR') ? '' : 'disabled' ?>>
+                    <option value="">Selecione</option>
+                    <?php foreach ($representantesDisponiveis as $rep): ?>
+                        <option value="<?= $rep['id'] ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+                <p class="mt-1 text-xs text-slate-500">Obrigatório para vendedores.</p>
+            <?php else: ?>
+                <input type="hidden" name="representante_id" value="<?= (int)$currentUser['id'] ?>">
+                <div class="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">Vinculado a <?= esc($currentUser['name']) ?></div>
+            <?php endif; ?>
         </div>
 
         <div>
             <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="estado">Estado</label>
-            <select name="estado" id="estado" required
-                    class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
-                <option value="">Selecione o estado (UF)</option>
-                <?php foreach ($todosEstados as $uf): ?>
-                    <option value="<?= $uf ?>" <?= $estadoAtual === $uf ? 'selected' : '' ?>><?= $uf ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?php if ($isRep): ?>
+                <input type="hidden" name="estado" value="<?= $estadoAtual ?>">
+                <div class="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"><?= $estadoAtual ?></div>
+            <?php else: ?>
+                <select name="estado" id="estado" required
+                        class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
+                    <option value="">Selecione o estado (UF)</option>
+                    <?php foreach ($todosEstados as $uf): ?>
+                        <option value="<?= $uf ?>" <?= $estadoAtual === $uf ? 'selected' : '' ?>><?= $uf ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php endif; ?>
         </div>
 
         <div>

@@ -112,6 +112,11 @@ function is_representante(array $user): bool
     return user_has_role($user, 'REPRESENTANTE');
 }
 
+function is_vendedor(array $user): bool
+{
+    return user_has_role($user, 'VENDEDOR');
+}
+
 function sanitize_decimal(?string $value): ?float
 {
     if ($value === null || $value === '') {
