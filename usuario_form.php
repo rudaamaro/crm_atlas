@@ -49,7 +49,9 @@ if (is_post()) {
             // Representante só cria/edita vendedores vinculados a si
             $role = 'VENDEDOR';
             $responsavelId = (int)$currentUser['id'];
-            $estado = $currentUser['estado'];
+            if (!empty($currentUser['estado'])) {
+                $estado = $currentUser['estado'];
+            }
         }
 
         if ($role === 'VENDEDOR' && $isAdmin) {
@@ -70,13 +72,6 @@ if (is_post()) {
 
 
         if ($estado === '') $erros[] = 'Informe o estado.';
-
-        if ($isRep) {
-            // Representante só cria/edita vendedores vinculados a si
-            $role = 'VENDEDOR';
-            $responsavelId = (int)$currentUser['id'];
-            $estado = $currentUser['estado'];
-        }
 
         if ($role === 'VENDEDOR' && !$responsavelId && $isAdmin) {
             $erros[] = 'Selecione o representante responsável.';
@@ -219,7 +214,8 @@ require __DIR__ . '/partials/header.php';
 
 // Lista de UFs (use input text se preferir; aqui deixo como <select>)
 $todosEstados = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
-$estadoAtual  = esc(old('estado', $usuario['estado'] ?? ($isRep ? $currentUser['estado'] : '')));
+$repHasEstadoFixo = $isRep && trim((string)$currentUser['estado']) !== '';
+$estadoAtual  = esc(old('estado', $usuario['estado'] ?? ($repHasEstadoFixo ? $currentUser['estado'] : '')));
 $cidadeAtual  = esc(old('cidade', $usuario['cidade'] ?? ''));
 $responsavelAtual = (int)old('representante_id', $usuario['representante_id'] ?? ($isRep ? $currentUser['id'] : 0));
 $representantesDisponiveis = $isAdmin
@@ -283,13 +279,14 @@ $representantesDisponiveis = $isAdmin
 
         <div>
             <label class="mb-1 block text-xs font-semibold uppercase text-slate-500" for="estado">Estado</label>
-            <?php if ($isRep): ?>
+            <?php if ($repHasEstadoFixo): ?>
                 <input type="hidden" name="estado" value="<?= $estadoAtual ?>">
                 <div class="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"><?= $estadoAtual ?></div>
             <?php else: ?>
                 <select name="estado" id="estado" required
                         class="w-full rounded border border-slate-200 px-3 py-2 text-sm">
-                    <option value="">Selecione o estado (UF)</option>
+                    <option value="">Selecione o estado (UF)
+                    </option>
                     <?php foreach ($todosEstados as $uf): ?>
                         <option value="<?= $uf ?>" <?= $estadoAtual === $uf ? 'selected' : '' ?>><?= $uf ?></option>
                     <?php endforeach; ?>

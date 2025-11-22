@@ -53,9 +53,10 @@ if (!$municipio) {
 }
 
 $sqlAtendimentos = <<<SQL
-SELECT a.*, u.name AS representante_usuario_nome, u.email AS representante_email
+SELECT a.*, u.name AS representante_usuario_nome, u.email AS representante_email, vend.name AS vendedor_nome_usuario
 FROM atendimentos a
 LEFT JOIN users u ON u.id = a.representante_id
+LEFT JOIN users vend ON vend.id = a.vendedor_id
 WHERE a.municipio_id = :municipio_id
   AND a.status_geral <> 'ARQUIVADO'
 ORDER BY a.responsavel_principal DESC, a.updated_at DESC
@@ -66,6 +67,7 @@ $stmt->execute([':municipio_id' => $municipioId]);
 $atendimentos = $stmt->fetchAll();
 foreach ($atendimentos as &$item) {
     $item['representante_nome'] = format_representante_nome($item['representante_nome_externo'] ?? null, $item['representante_usuario_nome'] ?? null);
+    $item['vendedor_nome'] = $item['vendedor_nome_usuario'] ?? '';
 }
 unset($item);
 
@@ -104,8 +106,11 @@ $backUrl = 'duplicidades.php' . ($repBack > 0 ? ('?representante_id=' . $repBack
                 <div class="mb-3 flex items-start justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-slate-800">
-                            <?= esc($atendimento['representante_nome'] ?? 'Representante') ?>
+                            Representante: <?= esc($atendimento['representante_nome'] ?? 'Representante') ?>
                         </h2>
+                        <p class="text-sm text-slate-600">
+                            Vendedor: <?= $atendimento['vendedor_nome'] !== '' ? esc($atendimento['vendedor_nome']) : '—' ?>
+                        </p>
                         <p class="text-xs uppercase tracking-wide text-slate-500">
                             Atualizado em <?= esc(format_date($atendimento['updated_at'], 'd/m/Y H:i')) ?>
                         </p>
