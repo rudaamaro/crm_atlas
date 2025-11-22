@@ -44,6 +44,7 @@ if (is_post()) {
         if ($email === '') $erros[] = 'Informe o email.';
         elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $erros[] = 'Email invalido.';
         if (!in_array($role, ['ADMIN','REPRESENTANTE','ADMIN/REPRESENTANTE','VENDEDOR'], true)) $erros[] = 'Perfil invalido.';
+
         if ($isRep) {
             // Representante só cria/edita vendedores vinculados a si
             $role = 'VENDEDOR';
@@ -67,7 +68,19 @@ if (is_post()) {
             }
         }
 
+
         if ($estado === '') $erros[] = 'Informe o estado.';
+
+        if ($isRep) {
+            // Representante só cria/edita vendedores vinculados a si
+            $role = 'VENDEDOR';
+            $responsavelId = (int)$currentUser['id'];
+            $estado = $currentUser['estado'];
+        }
+
+        if ($role === 'VENDEDOR' && !$responsavelId && $isAdmin) {
+            $erros[] = 'Selecione o representante responsável.';
+        }
 
         if ($isEdit) {
             if ($senha !== '' && strlen($senha) < 6) $erros[] = 'A senha deve ter pelo menos 6 caracteres.';
@@ -258,7 +271,11 @@ $representantesDisponiveis = $isAdmin
                 <select name="representante_id" id="representante_id" class="w-full rounded border border-slate-200 px-3 py-2 text-sm" <?= (old('role', $usuario['role'] ?? '') === 'VENDEDOR') ? '' : 'disabled' ?>>
                     <option value="">Selecione</option>
                     <?php foreach ($representantesDisponiveis as $rep): ?>
+
                         <option value="<?= $rep['id'] ?>" data-estado="<?= esc($rep['estado']) ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
+
+                        <option value="<?= $rep['id'] ?>" <?= (int)$rep['id'] === (int)$responsavelAtual ? 'selected' : '' ?>><?= esc($rep['name']) ?> (<?= esc($rep['estado']) ?>)</option>
+
                     <?php endforeach; ?>
                 </select>
                 <p class="mt-1 text-xs text-slate-500">Obrigatório para vendedores.</p>
@@ -281,7 +298,10 @@ $representantesDisponiveis = $isAdmin
                         <option value="<?= $uf ?>" <?= $estadoAtual === $uf ? 'selected' : '' ?>><?= $uf ?></option>
                     <?php endforeach; ?>
                 </select>
+
                 <p id="estado_hint" class="mt-1 text-xs text-slate-500 hidden">Estado herdado do representante responsável.</p>
+
+
             <?php endif; ?>
         </div>
 

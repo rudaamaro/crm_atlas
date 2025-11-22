@@ -150,6 +150,7 @@ function ensure_external_rep_column(PDO $pdo): void
     }
 }
 
+
 function ensure_atendimento_columns(PDO $pdo): void
 {
     $columns = $pdo->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'atendimentos'")
@@ -160,6 +161,7 @@ function ensure_atendimento_columns(PDO $pdo): void
         $pdo->exec("CREATE INDEX idx_atendimentos_vendedor ON atendimentos (vendedor_id)");
     }
 }
+
 
 function ensure_user_columns(PDO $pdo): void
 {
